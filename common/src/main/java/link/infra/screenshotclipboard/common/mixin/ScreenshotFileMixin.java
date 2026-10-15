@@ -1,7 +1,6 @@
 package link.infra.screenshotclipboard.common.mixin;
 
 import com.mojang.blaze3d.platform.NativeImage;
-import link.infra.screenshotclipboard.common.MacOSCompat;
 import link.infra.screenshotclipboard.common.ScreenshotToClipboard;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -12,17 +11,11 @@ import java.io.File;
 
 @Mixin(NativeImage.class)
 public abstract class ScreenshotFileMixin {
-	@Inject(method = "writeToFile(Ljava/io/File;)V", at = @At("HEAD"))
+	@Inject(method = "writeToFile(Ljava/io/File;)V", at = @At("HEAD"), cancellable = true)
 	private void screenshotclipboard$copyBeforeScreenshotSave(File file, CallbackInfo ci) {
-		if (isScreenshotFile(file) && !ScreenshotToClipboard.isMacOS()) {
+		if (isScreenshotFile(file)) {
 			ScreenshotToClipboard.handleScreenshotAWT((NativeImage) (Object) this);
-		}
-	}
-
-	@Inject(method = "writeToFile(Ljava/io/File;)V", at = @At("TAIL"))
-	private void screenshotclipboard$copyMacScreenshotAfterSave(File file, CallbackInfo ci) {
-		if (isScreenshotFile(file) && ScreenshotToClipboard.isMacOS()) {
-			MacOSCompat.doCopyMacOS(file.getAbsolutePath());
+			ci.cancel();
 		}
 	}
 
