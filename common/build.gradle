@@ -3,5 +3,6 @@ architectury {
 }
 
 dependencies {
+	compileOnly "net.fabricmc:sponge-mixin:0.17.4+mixin.0.8.7"
     implementation "ca.weblite:java-objc-bridge:1.0.0"
 }

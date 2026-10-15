@@ -51,7 +51,7 @@ public final class ScreenshotToClipboard {
 		ByteBuffer pixels = image.getPixelBytes();
 		byte[] copy = new byte[pixels.remaining()];
 		pixels.get(copy);
-		doCopy(copy, image.getWidth(), image.getHeight(), image.components());
+		doCopy(copy, image.getWidth(), image.getHeight(), 4);
 	}
 
 	public static void handleScreenshotAWT(ByteBuffer byteBuffer, int width, int height, int components) {
