@@ -1,11 +1,8 @@
 package link.infra.screenshotclipboard.common;
 
-import link.infra.screenshotclipboard.common.mixin.NativeImagePointerAccessor;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.lwjgl.system.MemoryUtil;
+import com.mojang.blaze3d.platform.NativeImage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.awt.*;
 import java.awt.color.ColorSpace;
@@ -13,86 +10,79 @@ import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
-import java.awt.image.*;
+import java.awt.image.BufferedImage;
+import java.awt.image.ComponentColorModel;
+import java.awt.image.DataBuffer;
+import java.awt.image.DataBufferByte;
+import java.awt.image.Raster;
 import java.nio.ByteBuffer;
+import java.util.Locale;
 
-public class ScreenshotToClipboard {
+public final class ScreenshotToClipboard {
 	public static final String MOD_ID = "screenshotclipboard";
-	private static final Logger LOGGER = LogManager.getFormatterLogger("ScreenshotToClipboard");
+	private static final Logger LOGGER = LoggerFactory.getLogger("ScreenshotToClipboard");
+
+	private ScreenshotToClipboard() {}
+
+	public static boolean isMacOS() {
+		return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+	}
 
 	public static void init() {
-		if (!MinecraftClient.IS_SYSTEM_MAC) {
-			// Test that the mixin was run properly
-			// Ensure AWT is loaded by forcing loadLibraries() to be called, will cause a HeadlessException if someone else already loaded AWT
+		if (!isMacOS()) {
 			try {
 				Toolkit.getDefaultToolkit().getSystemClipboard();
 			} catch (HeadlessException e) {
-				LOGGER.warn("java.awt.headless property was not set properly!");
+				LOGGER.warn("java.awt.headless was not disabled early enough", e);
 			}
 		}
 	}
 
-	public static void handleScreenshotAWT(NativeImage img) {
-		if (MinecraftClient.IS_SYSTEM_MAC) {
+	public static void handleScreenshotAWT(NativeImage image) {
+		if (isMacOS()) {
 			return;
 		}
 
-		// Only allow RGBA
-		if (img.getFormat() != NativeImage.Format.RGBA) {
-			LOGGER.warn("Failed to capture screenshot: wrong format");
+		if (image.format() != NativeImage.Format.RGBA) {
+			LOGGER.warn("Could not copy screenshot: unsupported image format {}", image.format());
 			return;
 		}
 
-		// IntellIJ doesn't like this
-		//noinspection ConstantConditions
-		long imagePointer = ((NativeImagePointerAccessor) (Object) img).getPointer();
-		ByteBuffer buf = MemoryUtil.memByteBufferSafe(imagePointer, img.getWidth() * img.getHeight() * 4);
-		if (buf == null) {
-			throw new RuntimeException("Invalid image");
-		}
-
-		handleScreenshotAWT(buf, img.getWidth(), img.getHeight(), 4);
+		ByteBuffer pixels = image.getPixelBytes();
+		byte[] copy = new byte[pixels.remaining()];
+		pixels.get(copy);
+		doCopy(copy, image.getWidth(), image.getHeight(), image.components());
 	}
 
 	public static void handleScreenshotAWT(ByteBuffer byteBuffer, int width, int height, int components) {
-		if (MinecraftClient.IS_SYSTEM_MAC) {
+		if (isMacOS()) {
 			return;
 		}
 
-		byte[] array;
-		if (byteBuffer.hasArray()) {
-			array = byteBuffer.array();
-		} else {
-			// can't use .array() as the buffer is not array-backed
-			array = new byte[height * width * components];
-			byteBuffer.get(array);
-		}
-
-		doCopy(array, width, height, components);
+		ByteBuffer pixels = byteBuffer.duplicate();
+		byte[] copy = new byte[pixels.remaining()];
+		pixels.get(copy);
+		doCopy(copy, width, height, components);
 	}
 
 	private static void doCopy(byte[] imageData, int width, int height, int components) {
 		new Thread(() -> {
-			DataBufferByte buf = new DataBufferByte(imageData, imageData.length);
-			ColorSpace cs = ColorSpace.getInstance(ColorSpace.CS_sRGB);
-			// Ignore the alpha channel, due to JDK-8204187
-			int[] nBits = {8, 8, 8};
-			int[] bOffs = {0, 1, 2}; // is this efficient, no transformation is being done?
-			ColorModel cm = new ComponentColorModel(cs, nBits, false, false,
-					Transparency.TRANSLUCENT,
-					DataBuffer.TYPE_BYTE);
-			BufferedImage bufImg = new BufferedImage(cm, Raster.createInterleavedRaster(buf,
-					width, height,
-					width * components, components,
-					bOffs, null), false, null);
+			DataBufferByte buffer = new DataBufferByte(imageData, imageData.length);
+			ColorSpace colorSpace = ColorSpace.getInstance(ColorSpace.CS_sRGB);
+			int[] componentBits = {8, 8, 8};
+			int[] bandOffsets = {0, 1, 2};
+			ComponentColorModel colorModel = new ComponentColorModel(colorSpace, componentBits, false, false,
+					Transparency.TRANSLUCENT, DataBuffer.TYPE_BYTE);
+			BufferedImage bufferedImage = new BufferedImage(colorModel, Raster.createInterleavedRaster(buffer,
+					width, height, width * components, components, bandOffsets, null), false, null);
 
-			Transferable trans = getTransferableImage(bufImg);
-			Clipboard c = Toolkit.getDefaultToolkit().getSystemClipboard();
-			c.setContents(trans, null);
+			Transferable transferable = getTransferableImage(bufferedImage);
+			Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+			clipboard.setContents(transferable, null);
 		}, "Screenshot to Clipboard Copy").start();
 	}
 
-	private static Transferable getTransferableImage(final BufferedImage bufferedImage) {
+	private static Transferable getTransferableImage(BufferedImage bufferedImage) {
 		return new Transferable() {
 			@Override
 			public DataFlavor[] getTransferDataFlavors() {

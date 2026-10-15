@@ -1,8 +1,5 @@
 plugins {
-    id 'com.github.johnrengelman.shadow'
-
-    id "com.modrinth.minotaur" version "2.+"
-    id "com.matthewprenger.cursegradle" version "1.4.0"
+    id 'com.gradleup.shadow'
 }
 
 architectury {
@@ -19,33 +16,21 @@ configurations {
     runtimeClasspath.extendsFrom common
     developmentFabric.extendsFrom common
 
-    // Files in this configuration will be bundled into your mod using the Shadow plugin.
-    // Don't use the `shadow` configuration from the plugin itself as it's meant for excluding files.
     shadowBundle {
         canBeResolved = true
         canBeConsumed = false
     }
 }
 
-repositories {
-    maven {
-        url = "https://api.modrinth.com/maven"
-    }
-}
-
 dependencies {
     modImplementation "net.fabricmc:fabric-loader:$rootProject.fabric_loader_version"
-
-    modCompileOnly "maven.modrinth:fabrishot:${rootProject.fabrishot_version}"
-    modCompileOnly fabricApi.module("fabric-api-base", rootProject.fabric_api_version)
-
-    common(project(path: ':common', configuration: 'namedElements')) { transitive false }
+    common(project(path: ':common', configuration: 'namedElements')) { transitive = false }
     shadowBundle project(path: ':common', configuration: 'transformProductionFabric')
+    shadowBundle 'ca.weblite:java-objc-bridge:1.0.0'
 }
 
 processResources {
     inputs.property 'version', project.version
-
     filesMatching('fabric.mod.json') {
         expand version: project.version
     }
@@ -53,62 +38,10 @@ processResources {
 
 shadowJar {
     configurations = [project.configurations.shadowBundle]
-    archiveClassifier = 'dev-shadow'
+    archiveClassifier = ''
 }
 
-remapJar {
-    input.set shadowJar.archiveFile
-}
-
-// TODO: infer from fabric.mod.json?!
-def supportedVersions = ["1.20.6", "1.21"]
-def versionSupportName = "(Fabric/Quilt 1.20.6+)"
-
-if (System.getenv("MODRINTH_TOKEN")) {
-    modrinth {
-        token = System.getenv("MODRINTH_TOKEN")
-        projectId = rootProject.modrinth_id
-        versionNumber = rootProject.mod_version + "+fabric"
-        uploadFile = remapJar
-        gameVersions = supportedVersions
-        loaders = ["fabric", "quilt"]
-        detectLoaders = false
-        versionName = rootProject.mod_version + " " + versionSupportName
-        changelog = rootProject.ext.changelog
-    }
-
-    publish.dependsOn(tasks.named("modrinth"))
-}
-
-if (System.getenv("CURSEFORGE_TOKEN")) {
-    curseforge {
-        apiKey = System.getenv("CURSEFORGE_TOKEN")
-        project {
-            id = rootProject.curseforge_id_fabric
-            releaseType = "release"
-
-            mainArtifact(remapJar) {
-                displayName = rootProject.mod_version + " " + versionSupportName
-            }
-            for (version in supportedVersions) {
-                addGameVersion(version)
-            }
-            addGameVersion("Fabric")
-            changelog = rootProject.ext.changelog
-            changelogType = "markdown"
-        }
-    }
-
-    publish.dependsOn(tasks.named("curseforge"))
-}
-
-configurations {
-    remapJarOutput {
-        canBeConsumed = true
-        canBeResolved = false
-    }
-}
-
-artifacts {
-    remapJarOutput(remapJar) // For consumption by github release
+jar {
+    archiveClassifier = 'dev'
+    finalizedBy shadowJar
 }

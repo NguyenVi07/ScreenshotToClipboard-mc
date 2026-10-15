@@ -1,40 +1,7 @@
 plugins {
-    id 'dev.architectury.loom' version '1.6-SNAPSHOT' apply false
-    id 'architectury-plugin' version '3.4-SNAPSHOT'
-    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
-
-    id "com.github.breadmoirai.github-release" version "2.5.2"
-    id "org.ajoberstar.grgit" version "5.0.0-rc.3"
-    id "maven-publish"
-}
-
-
-String getGitVersion(Project project) {
-    if (grgit != null) {
-        if (grgit.describe(tags: true) == "${project.mod_version}") {
-            return "${project.mod_version}"
-        } else {
-            var dirty = grgit.status().clean ? "" : "dirty"
-            return "${project.mod_version}-dev.${grgit.head().abbreviatedId}+${dirty}"
-        }
-    } else {
-        return "${project.mod_version}-dev.unknown"
-    }
-}
-
-String getChangelog(String githubUrl) {
-    // Get changes since the last tag
-    return grgit.log(includes: ["HEAD"], excludes: [
-            // Get the last tag, removing the number of commits since the tag and the current HEAD~ hash
-            grgit.describe(commit: "HEAD~", tags: true).replaceAll("-\\d+-[a-z0-9]+\$", "")
-    ]).collect {
-        "- ${it.shortMessage} (${it.author.name})"
-    }.join("\n") + (githubUrl == null ? "" : "\n\nSee the full changes on Github: ${githubUrl}commits/${grgit.describe(tags: true)}")
-}
-
-ext {
-    changelog = getChangelog(rootProject.github_url)
-    changelogGithub = getChangelog(null)
+    id 'dev.architectury.loom-no-remap' version '1.17-SNAPSHOT' apply false
+    id 'architectury-plugin' version '3.5-SNAPSHOT'
+    id 'com.gradleup.shadow' version '9.4.3' apply false
 }
 
 architectury {
@@ -43,96 +10,43 @@ architectury {
 
 allprojects {
     group = rootProject.maven_group
-    version = getGitVersion(rootProject)
+    version = rootProject.mod_version
 }
 
 subprojects {
-    apply plugin: 'dev.architectury.loom'
+    apply plugin: 'java-library'
+    apply plugin: 'dev.architectury.loom-no-remap'
     apply plugin: 'architectury-plugin'
-    apply plugin: 'maven-publish'
 
     base {
-        // Set up a suffixed format for the mod jar names, e.g. `example-fabric`.
-        archivesName = "$rootProject.archives_name-$project.name"
+        archivesName = "${rootProject.archives_name}-$project.name"
     }
 
     repositories {
-        // Add repositories to retrieve artifacts from in here.
-        // You should only use this when depending on other mods because
-        // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-        // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-        // for more information about repositories.
+        maven { url = 'https://maven.neoforged.net/releases' }
     }
 
     dependencies {
-        minecraft "net.minecraft:minecraft:$rootProject.minecraft_version"
-        mappings loom.layered {
-            it.mappings("net.fabricmc:yarn:$rootProject.yarn_mappings:v2")
-            it.mappings("dev.architectury:yarn-mappings-patch-neoforge:$rootProject.yarn_mappings_patch_neoforge_version")
-        }
-
-        // This library loads in OSX, but not in Windows - I'm including it here so I can compile on Windows
-        implementation "ca.weblite:java-objc-bridge:1.0.0"
+        minecraft "com.mojang:minecraft:$rootProject.minecraft_version"
     }
 
     java {
-        // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-        // if it is present.
-        // If you remove this line, sources will not be generated.
         withSourcesJar()
-
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_25
+        targetCompatibility = JavaVersion.VERSION_25
     }
 
     tasks.withType(JavaCompile).configureEach {
-        it.options.release = 21
+        options.release = 25
+        options.encoding = 'UTF-8'
     }
+}
 
-    // Configure Maven publishing.
-    publishing {
-        publications {
-            mavenJava(MavenPublication) {
-                artifactId = base.archivesName.get()
-                from components.java
-            }
-        }
-
-        // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
-        repositories {
-            // Add repositories to publish to here.
-            // Notice: This block does NOT have the same function as the block in the top level.
-            // The repositories here will be used for publishing your artifact, not for
-            // retrieving dependencies.
+tasks.register('verifyReleaseVersion') {
+    doLast {
+        def expected = providers.gradleProperty('releaseModVersion').orNull
+        if (expected == null || expected != rootProject.mod_version) {
+            throw new GradleException("Release version '$expected' does not match mod_version '${rootProject.mod_version}'")
         }
     }
-}
-
-configurations {
-    githubReleaseJars {
-        canBeConsumed = false
-        canBeResolved = true
-    }
-}
-
-dependencies {
-    githubReleaseJars(project(path: ":fabric", configuration: "remapJarOutput"))
-    githubReleaseJars(project(path: ":neoforge", configuration: "remapJarOutput"))
-}
-
-if (System.getenv("GITHUB_TOKEN")) {
-    githubRelease {
-        owner = rootProject.github_repo_user
-        repo = rootProject.github_repo_name
-        tagName = rootProject.mod_version
-        releaseName = "Release ${rootProject.mod_version}"
-        targetCommitish = "1.20-arch" // TODO: get from git?
-        draft = false
-        body = rootProject.ext.changelogGithub
-        token System.getenv("GITHUB_TOKEN")
-        releaseAssets.from(rootProject.configurations.githubReleaseJars)
-        overwrite = true
-    }
-
-    publish.dependsOn(tasks.githubRelease)
 }
